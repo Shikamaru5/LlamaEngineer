@@ -1,6 +1,7 @@
 from transformers import AutoTokenizer, LlamaForCausalLM, BitsAndBytesConfig
 from tqdm import tqdm
 import torch
+from optimum.bettertransformer import BetterTransformer
 
 # initialize the model
 #bnb_4bit_quant_type="nf4"
@@ -475,6 +476,7 @@ device_map = {
 
 model_path = "Phind/Phind-CodeLlama-34B-v2"
 model = LlamaForCausalLM.from_pretrained(model_path, quantization_config=bnb_config, device_map=device_map)
+bt_model = BetterTransformer.transform(model, keep_original_model=False)
 tokenizer = AutoTokenizer.from_pretrained(model_path)
 #model.config.quantization_config.to_dict()
 
@@ -485,15 +487,16 @@ def generate(prompt: str):
     tokenizer.pad_token = tokenizer.eos_token
     inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=4096)
 
-    # Generate
-    generate_ids = model.generate(inputs.input_ids.to("cuda"), max_length=384)
-    completion = tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
-    completion = completion.replace(prompt, "").split("\n\n\n")[0]
+    with torch.backends.cuda.sdp_kernel(enable_flash=True, enable_math=False, enable_mem_efficient=False):
+        # Generate
+        generate_ids = bt_model.generate(inputs.input_ids.to("cuda"), max_length=4096)
+        completion = tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
+        completion = completion.replace(prompt, "").split("\n\n\n")[0]
 
-    # Print the completion to the console
-    print("Generated Completion:")
-    print(completion)
+        # Print the completion to the console
+        print("Generated Completion:")
+        print(completion)
 
-    return completion
+        return completion
 prompt = "Please write a small script that prints the numbers 1-10 in the console"
 generated_text = generate(prompt)
